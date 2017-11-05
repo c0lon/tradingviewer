@@ -94,28 +94,3 @@ async def watch_accounts(client, **config):
             json.dump(account_data, f, sort_keys=True, indent=2)
 
         await asyncio.sleep(config['interval'])
-
-
-def main():
-    arg_parser = ArgumentParser()
-    arg_parser.add_argument('config_uri', type=str,
-            help='the config file to use.')
-    args = arg_parser.parse_args()
-
-    assert os.path.isfile(args.config_uri)
-    with open(args.config_uri) as f:
-        config = yaml.safe_load(f)
-    assert os.path.isfile(config['accounts'])
-
-    client = discord.Client()
-
-    @client.event
-    async def on_ready():
-        logging.debug('ready')
-        client.loop.create_task(watch_accounts(client, **config))
-
-    client.run(config['bot']['token'])
-
-
-if __name__ == '__main__':
-    main()
