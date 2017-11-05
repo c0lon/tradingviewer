@@ -88,6 +88,7 @@ async def watch_accounts(client, **config):
             handled = account_data['handled'].get(account_name, [])
             latest_post = await check_account(account_name, handled)
             if latest_post:
+                account_data['handled'][account_name] = handled
                 await upload_latest_post(client, channel, latest_post)
 
         with open(accounts_file, 'w+') as f:
