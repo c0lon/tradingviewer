@@ -64,7 +64,9 @@ async def check_account(account_name, handled):
 
 
 async def upload_latest_post(client, channel, post):
-    logging.info('uploading post', extra={'post' : post})
+    msg = 'uploading post: {} {} ({})'.format(
+            post['account']['name'], post['market'], post['url'])
+    logging.info(msg, extra={'post' : post})
 
     embed = discord.Embed()
     embed.set_author(name=post['account']['name'],
