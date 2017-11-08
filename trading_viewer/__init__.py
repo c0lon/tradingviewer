@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from datetime import datetime
 import json
 import logging
@@ -7,116 +8,167 @@ import os
 import aiohttp
 from bs4 import BeautifulSoup
 import discord
+from discord.ext import commands
 
 
 TRADINGVIEW_BASE_URL = 'https://www.tradingview.com'
-ACCOUNT_URL_FMT = 'https://www.tradingview.com/u/{account_name}'
-ACCOUNT_LAST_POST_URL_FMT = 'https://www.tradingview.com/ideas-widget/?count=1&header=true&idea_url=&interval=all&offset=0&publish_source=&sort=recent&stream=all&symbol=&time=all&username={account_name}'
-
-ACCOUNTS_TO_ADD = []
-
-
-async def add_account(account_name):
-    account_url = ACCOUNT_URL_FMT.format(account_name=account_name)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(account_url) as response:
-            if response.status != 200:
-                return
-
-    logging.info('adding account: {}'.format(account_name))
-    ACCOUNTS_TO_ADD.append(account_name)
-    return account_url
+ACCOUNT_URL_FMT = TRADINGVIEW_BASE_URL + '/u/{account_name}'
+ACCOUNT_ICON_URL_FMT = 'https://s3.tradingview.com/userpics/{account_id}.png'
+POST_IMAGE_URL_FMT = 'https://s3.tradingview.com/{first_letter}/{image_id}_big.png'
 
 
-async def check_account(account_name, handled):
-    logging.debug('checking account: {}'.format(account_name))
 
-    account_url = ACCOUNT_LAST_POST_URL_FMT.format(account_name=account_name)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(account_url) as response:
-            account_json = await response.json()
+"""
+read accounts from list
+check each account
+    get the html of each account page and check for new posts
+    if new post:
+        get all data from html
+        save post id
+        upload to discord
+save account data
+"""
 
-    html = account_json['html']
-    soup = BeautifulSoup(html, 'html.parser')
 
-    ta_image = soup.find('img', class_='chart-image')
-    if not ta_image:
-        logging.warning('no image found for account: {}'.format(account_name))
-        return
+class TradingViewer:
+    def __init__(self, **config):
+        self.account_file = config['account_file']
+        if not os.path.isfile(self.account_file):
+            raise OSError('Invalid account file: {}'.format(self.account_file))
+        self.load_account_data()
 
-    ta_image_url = ta_image['data-image_big']
-    ta_market = ta_image['alt']
-    if ta_image_url in handled:
-        logging.debug('already handled: {}'.format(ta_image_url))
-        return
+        self.bot = commands.Bot(command_prefix=config['bot']['command_prefix'])
+        self.interval = config['bot']['interval']
+        self.channel_id = config['bot']['channel_id']
 
-    timestamp_div = soup.find('div', class_='time-info time-upd')
-    if not timestamp_div:
-        logging.error('no timestamp found')
-        return
+    def get_channel(self):
+        return self.bot.get_channel(self.channel_id)
+    channel = property(get_channel)
 
-    timestamp = float(timestamp_div['data-timestamp'])
-    ta_timestamp = datetime.utcfromtimestamp(timestamp) \
-            .strftime('%Y-%m-%d %I:%M:%S')
+    def load_account_data(self):
+        with open(self.account_file) as f:
+            self.accounts = json.load(f)
 
-    account_link = soup.find('a', class_='avatar userlink')
-    if not account_link:
-        logging.error('no account link found')
-        return
+    def save_account_data(self):
+        with open(self.account_file, 'w+') as f:
+            json.dump(self.accounts, f, indent=2, sort_keys=True)
 
-    account_url = '{}/{}'.format(TRADINGVIEW_BASE_URL, account_link['href'])
-    account_icon_url = account_link.find('img')['src']
+    async def add_account(self, account_name):
+        logger = logging.getLogger('add_account')
+        logger.debug(account_name)
 
-    handled.append(ta_image_url)
-    return {
-        'account' : {
-            'name' : account_name,
+        if account_name in self.accounts:
+            logger.warning('account already being watched: {}'.format(account_name))
+            return
+
+        account_url = ACCOUNT_URL_FMT.format(account_name=account_name)
+        async with aiohttp.ClientSession() as session:
+            async with aiohttp.get(account_url) as response:
+                if response.status != 200:
+                    logger.warning('invalid account: {}'.format(account_name))
+                    return
+
+        account = {
             'url' : account_url,
-            'icon_url' : account_icon_url
-        },
-        'market' : ta_market,
-        'url' : ta_image_url,
-        'timestamp' : ta_timestamp
-    }
+            'handled' : []
+        }
+        self.accounts[account_name] = account
+        await self.check_account(account_name)
+        self.save_account_data()
 
+        return account
 
-async def upload_latest_post(client, channel, post):
-    msg = 'uploading post: {} {} ({})'.format(
+    async def watch_accounts(self):
+        while True:
+            self.load_account_data()
+            for account_name in self.accounts:
+                await self.check_account(account_name)
+            self.save_account_data()
+            await asyncio.sleep(self.interval)
+
+    async def check_account(self, account_name):
+        logger = logging.getLogger('check_account')
+        logger.debug(account_name)
+
+        account = self.accounts.get(account_name)
+        if not account:
+            logger.warning('not watching account: {}'.format(account_name))
+            return
+            
+        async with aiohttp.ClientSession() as session:
+            async with session.get(account['url']) as response:
+                account_soup = BeautifulSoup(await response.text(), 'html.parser')
+
+        latest_post_div = account_soup.find('div', class_='js-cb-item')
+        latest_post_data = json.loads(latest_post_div['data-widget-data'])
+        account_id = latest_post_data['user']['id']
+
+        post_id = latest_post_data['id']
+        if post_id in account['handled']:
+            logger.debug('already handled: {}'.format(post_id))
+            return
+        account['handled'].append(post_id)
+
+        post_url = '{}/{}'.format(TRADINGVIEW_BASE_URL,
+                latest_post_data['published_chart_url'])
+        post_image_id = latest_post_data['image_url']
+        post_image_url = POST_IMAGE_URL_FMT.format(
+            first_letter=post_image_id[0], image_id=post_image_id)
+
+        post_description_elmt = latest_post_div.find('p',
+            class_='tv-widget-idea__description-text')
+        post_description = post_description_elmt.text.strip()
+
+        post_timestamp = latest_post_div.find('span', class_='tv-widget-idea__time')
+        post_datetime = datetime.fromtimestamp(float(post_timestamp['data-timestamp']))
+
+        post = {
+            'account' : {
+                'name' : account_name,
+                'url' : account['url'],
+                'icon_url' : ACCOUNT_ICON_URL_FMT.format(account_id=account_id)
+            },
+            'market' : latest_post_data['name'],
+            'url' : post_url,
+            'image_url' : post_image_url,
+            'description' : post_description,
+            'timestamp' : post_datetime
+        }
+        logger.debug(post)
+
+        await self.upload_post(post)
+
+    async def upload_post(self, post):
+        msg = 'uploading post: {} {} ({})'.format(
             post['account']['name'], post['market'], post['url'])
-    logging.info(msg, extra={'post' : post})
+        logging.getLogger('upload_post').info(msg, extra={'post' : post})
 
-    embed = discord.Embed()
-    embed.set_author(name=post['account']['name'],
+        embed = discord.Embed(title=post['market'],
+                timestamp=post['timestamp'], description=post['description'])
+        embed.set_author(name=post['account']['name'],
             url=post['account']['url'], icon_url=post['account']['icon_url'])
-    embed.add_field(name='Market', value=post['market'], inline=True)
-    embed.add_field(name='Timestamp', value=post['timestamp'])
-    embed.set_image(url=post['url'])
+        embed.set_image(url=post['image_url'])
 
-    await client.send_message(channel, embed=embed)
+        await self.bot.send_message(self.channel, embed=embed)
 
+    @classmethod
+    def watch(cls, **config):
+        logger = logging.getLogger('TradingViewer.watch')
+        logger.debug('start')
 
-async def watch_accounts(client, **config):
-    accounts_file = config['accounts']
-    channel = client.get_channel(config['channel_id'])
+        viewer = cls(**config)
 
-    while True:
-        with open(accounts_file) as f:
-            account_data = json.load(f)
+        @viewer.bot.event
+        async def on_ready():
+            viewer.bot.loop.create_task(viewer.watch_accounts())
 
-        while ACCOUNTS_TO_ADD:
-            new_account = ACCOUNTS_TO_ADD.pop()
-            if new_account not in account_data['accounts']:
-                account_data['accounts'].append(new_account)
-                account_data['handled'][new_account] = []
+        @viewer.bot.command()
+        async def add(account_name : str):
+            account = await viewer.add_account(account_name)
+            if account:
+                message = 'Added account: {}\n{}.'.format(account_name, account['url'])
+            else:
+                message = 'Invalid TradingView account: "{}"'.format(account_name)
+            viewer.bot.send_message(viewer.channel, message)
 
-        for account_name in account_data['accounts']:
-            handled = account_data['handled'].get(account_name, [])
-            latest_post = await check_account(account_name, handled)
-            if latest_post:
-                await upload_latest_post(client, channel, latest_post)
-            account_data['handled'][account_name] = handled
-
-        with open(accounts_file, 'w+') as f:
-            json.dump(account_data, f, sort_keys=True, indent=2)
-
-        await asyncio.sleep(config['interval'])
+        viewer.bot.run(config['bot']['token'])

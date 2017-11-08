@@ -4,12 +4,10 @@ import logging.config
 import os
 
 import discord
+from discord.ext import commands
 import yaml
 
-from trading_viewer import (
-    add_account,
-    watch_accounts,
-    )
+from trading_viewer import TradingViewer
 
 
 DEFAULT_ACCOUNTS = {
@@ -27,13 +25,16 @@ def main():
     assert os.path.isfile(args.config_uri), 'Config file does not exist.'
     with open(args.config_uri) as f:
         config = yaml.safe_load(f)
+    logging.config.dictConfig(config['logging'])
+
+    TradingViewer.watch(**config)
+    return
 
     account_file = config['accounts']
     if not os.path.isfile(account_file):
         with open(account_file, 'w+') as f:
             json.dump(DEFAULT_ACCOUNTS, f, sort_keys=True, indent=2)
 
-    logging.config.dictConfig(config['logging'])
 
     client = discord.Client()
     add_account_prefix = config['bot']['command']['add_account']
