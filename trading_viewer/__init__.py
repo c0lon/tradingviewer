@@ -10,11 +10,28 @@ import discord
 
 
 TRADINGVIEW_BASE_URL = 'https://www.tradingview.com'
-ACCOUNT_URL_FMT = 'https://www.tradingview.com/ideas-widget/?count=1&header=true&idea_url=&interval=all&offset=0&publish_source=&sort=recent&stream=all&symbol=&time=all&username={account_name}'
+ACCOUNT_URL_FMT = 'https://www.tradingview.com/u/{account_name}'
+ACCOUNT_LAST_POST_URL_FMT = 'https://www.tradingview.com/ideas-widget/?count=1&header=true&idea_url=&interval=all&offset=0&publish_source=&sort=recent&stream=all&symbol=&time=all&username={account_name}'
+
+ACCOUNTS_TO_ADD = []
+
+
+async def add_account(account_name):
+    account_url = ACCOUNT_URL_FMT.format(account_name=account_name)
+    async with aiohttp.ClientSession() as session:
+        async with session.get(account_url) as response:
+            if response.status != 200:
+                return
+
+    logging.info('adding account: {}'.format(account_name))
+    ACCOUNTS_TO_ADD.append(account_name)
+    return account_url
 
 
 async def check_account(account_name, handled):
-    account_url = ACCOUNT_URL_FMT.format(account_name=account_name)
+    logging.debug('checking account: {}'.format(account_name))
+
+    account_url = ACCOUNT_LAST_POST_URL_FMT.format(account_name=account_name)
     async with aiohttp.ClientSession() as session:
         async with session.get(account_url) as response:
             account_json = await response.json()
@@ -24,7 +41,7 @@ async def check_account(account_name, handled):
 
     ta_image = soup.find('img', class_='chart-image')
     if not ta_image:
-        logging.error('no image found')
+        logging.warning('no image found for account: {}'.format(account_name))
         return
 
     ta_image_url = ta_image['data-image_big']
@@ -86,12 +103,18 @@ async def watch_accounts(client, **config):
         with open(accounts_file) as f:
             account_data = json.load(f)
 
+        while ACCOUNTS_TO_ADD:
+            new_account = ACCOUNTS_TO_ADD.pop()
+            if new_account not in account_data['accounts']:
+                account_data['accounts'].append(new_account)
+                account_data['handled'][new_account] = []
+
         for account_name in account_data['accounts']:
             handled = account_data['handled'].get(account_name, [])
             latest_post = await check_account(account_name, handled)
             if latest_post:
-                account_data['handled'][account_name] = handled
                 await upload_latest_post(client, channel, latest_post)
+            account_data['handled'][account_name] = handled
 
         with open(accounts_file, 'w+') as f:
             json.dump(account_data, f, sort_keys=True, indent=2)
