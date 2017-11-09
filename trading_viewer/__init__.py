@@ -59,7 +59,7 @@ class TradingViewer:
             accounts = '\n'.join(['* {}'.format(a) for a in self.accounts])
             message = 'Watching the following TradingView accounts:\n{}'.format(accounts)
         else:
-            message = 'Not watching any TradingView accounts'
+            message = 'Not watching any TradingView accounts.'
 
         await self.bot.send_message(self.channel, message)
 
@@ -68,7 +68,7 @@ class TradingViewer:
         logger.debug(account_name)
 
         if account_name in self.accounts:
-            message = 'already watching account: {}'.format(account_name)
+            message = 'Already watching account: {}'.format(account_name)
             logger.warning(message)
             await self.bot.send_message(self.channel, message)
             return
@@ -77,7 +77,7 @@ class TradingViewer:
         async with aiohttp.ClientSession() as session:
             async with aiohttp.get(account_url) as response:
                 if response.status != 200:
-                    message = 'invalid TradingView account: {}'.format(account_name)
+                    message = 'Invalid TradingView account: {}'.format(account_name)
                     logger.warning(message)
                     await self.bot.send_message(self.channel, message)
                     return
