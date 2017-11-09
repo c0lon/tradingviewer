@@ -138,6 +138,10 @@ class TradingViewer:
                 account_soup = BeautifulSoup(await response.text(), 'html.parser')
 
         latest_post_div = account_soup.find('div', class_='js-cb-item')
+        if not latest_post_div:
+            logger.debug('No posts for account: {}'.format(account_name))
+            return
+
         latest_post_data = json.loads(latest_post_div['data-widget-data'])
         account_id = latest_post_data['user']['id']
 
