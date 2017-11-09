@@ -53,20 +53,38 @@ class TradingViewer:
         with open(self.account_file, 'w+') as f:
             json.dump(self.accounts, f, indent=2, sort_keys=True)
 
+    async def list_accounts(self):
+        self.load_account_data()
+        if self.accounts:
+            accounts = '\n'.join(['* {}'.format(a) for a in self.accounts])
+            message = 'Watching the following TradingView accounts:\n{}'.format(accounts)
+        else:
+            message = 'Not watching any TradingView accounts'
+
+        await self.bot.send_message(self.channel, message)
+
     async def add_account(self, account_name):
         logger = logging.getLogger('add_account')
         logger.debug(account_name)
 
         if account_name in self.accounts:
-            logger.warning('account already being watched: {}'.format(account_name))
+            message = 'already watching account: {}'.format(account_name)
+            logger.warning(message)
+            await self.bot.send_message(self.channel, message)
             return
 
         account_url = ACCOUNT_URL_FMT.format(account_name=account_name)
         async with aiohttp.ClientSession() as session:
             async with aiohttp.get(account_url) as response:
                 if response.status != 200:
-                    logger.warning('invalid account: {}'.format(account_name))
+                    message = 'invalid TradingView account: {}'.format(account_name)
+                    logger.warning(message)
+                    await self.bot.send_message(self.channel, message)
                     return
+
+        message = 'TradingView account added: {}\n{}'.format(account_name, account_url)
+        logger.info(message)
+        await self.bot.send_message(self.channel, message)
 
         account = {
             'url' : account_url,
@@ -76,13 +94,33 @@ class TradingViewer:
         await self.check_account(account_name)
         self.save_account_data()
 
-        return account
+        return True
+
+    async def remove_account(self, account_name):
+        logger = logging.getLogger('remove_account')
+        logger.debug(account_name)
+
+        if account_name not in self.accounts:
+            message = 'Not watching TradingView account: {}'.format(account_name)
+            logger.warning(message)
+            await self.bot.send_message(self.channel, message)
+            return
+
+        message = 'Stopped following TradingView account: {}'.format(account_name)
+        logger.info(message)
+        await self.bot.send_message(self.channel, message)
+
+        del self.accounts[account_name]
+        self.save_account_data()
+
+        return True
 
     async def watch_accounts(self):
         while True:
             self.load_account_data()
             for account_name in self.accounts:
                 await self.check_account(account_name)
+
             self.save_account_data()
             await asyncio.sleep(self.interval)
 
@@ -107,7 +145,6 @@ class TradingViewer:
         if post_id in account['handled']:
             logger.debug('already handled: {}'.format(post_id))
             return
-        account['handled'].append(post_id)
 
         post_url = '{}/{}'.format(TRADINGVIEW_BASE_URL,
                 latest_post_data['published_chart_url'])
@@ -136,7 +173,9 @@ class TradingViewer:
         }
         logger.debug(post)
 
-        await self.upload_post(post)
+        if await self.upload_post(post):
+            account['handled'].append(post_id)
+            self.save_account_data()
 
     async def upload_post(self, post):
         msg = 'uploading post: {} {} ({})'.format(
@@ -150,6 +189,7 @@ class TradingViewer:
         embed.set_image(url=post['image_url'])
 
         await self.bot.send_message(self.channel, embed=embed)
+        return True
 
     @classmethod
     def watch(cls, **config):
@@ -163,12 +203,21 @@ class TradingViewer:
             viewer.bot.loop.create_task(viewer.watch_accounts())
 
         @viewer.bot.command()
-        async def add(account_name : str):
-            account = await viewer.add_account(account_name)
-            if account:
-                message = 'Added account: {}\n{}.'.format(account_name, account['url'])
-            else:
-                message = 'Invalid TradingView account: "{}"'.format(account_name)
-            viewer.bot.send_message(viewer.channel, message)
+        async def list():
+            await viewer.list_accounts()
+
+        @viewer.bot.command(pass_context=True)
+        async def add(ctx, account_name : str):
+            if ctx.message.channel != viewer.channel:
+                return
+
+            await viewer.add_account(account_name)
+
+        @viewer.bot.command(pass_context=True)
+        async def remove(ctx, account_name : str):
+            if ctx.message.channel != viewer.channel:
+                return
+
+            await viewer.remove_account(account_name)
 
         viewer.bot.run(config['bot']['token'])
