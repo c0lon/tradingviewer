@@ -186,7 +186,7 @@ class TradingViewer:
             post['account']['name'], post['market'], post['url'])
         logging.getLogger('upload_post').info(msg, extra={'post' : post})
 
-        embed = discord.Embed(title=post['market'],
+        embed = discord.Embed(title=post['market'], url=post['url'],
                 timestamp=post['timestamp'], description=post['description'])
         embed.set_author(name=post['account']['name'],
             url=post['account']['url'], icon_url=post['account']['icon_url'])
