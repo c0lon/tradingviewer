@@ -154,7 +154,7 @@ class TradingViewer:
                 latest_post_data['published_chart_url'])
         post_image_id = latest_post_data['image_url']
         post_image_url = POST_IMAGE_URL_FMT.format(
-            first_letter=post_image_id[0], image_id=post_image_id)
+            first_letter=post_image_id[0].lower(), image_id=post_image_id)
 
         post_description_elmt = latest_post_div.find('p',
             class_='tv-widget-idea__description-text')
