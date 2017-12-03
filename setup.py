@@ -17,6 +17,7 @@ dependency_links = [
     ]
 install_requires = [
     'aiohttp',
+    'bs4',
     'discord',
     'psycopg2',
     'pyyaml',

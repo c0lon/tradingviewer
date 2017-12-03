@@ -3,29 +3,18 @@ import logging
 from pprint import pprint
 
 import aiohttp
-import requests
+from bs4 import BeautifulSoup
 
 
-ACCOUNT_URL_FMT = 'https://www.tradingview.com/u/{account_name}'
+HTML_PARSER = 'html.parser'
 
 
-async def get_account_info(account_name):
-    account_url = ACCOUNT_URL_FMT.format(account_name=account_name)
-    async with aiohttp.get(account_url) as response:
+async def get_soup(url):
+    async with aiohttp.get(url) as response:
         if response.status != 200:
             return
-        soup = BeautifulSoup(await response.text(), 'html.parser')
 
-    account_info = {
-        'name' : account_name,
-        'url' : account_url
-    }
-
-    account_image = soup.find('img', class_='tv-profile__avatar-img')
-    if account_image:
-        account_info['image_url'] = account_image['src']
-
-    return account_info
+        return BeautifulSoup(await response.text(), HTML_PARSER)
 
 
 class GetLoggerMixin:
