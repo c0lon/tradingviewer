@@ -48,7 +48,7 @@ class TradingViewer(GetLoggerMixin):
             if added:
                 latest_posts = await account.get_new_posts(session, count=1)
                 if latest_posts:
-                    await self.upload_post(latest_posts[0])
+                    await self.upload_posts(latest_posts)
 
     async def remove_account(self, account_name):
         with transaction(TradingViewerDBSession) as session:
@@ -60,7 +60,7 @@ class TradingViewer(GetLoggerMixin):
                 embed.set_image(url=account.image_url)
                 TradingViewAccount.delete(session, account)
 
-        await self.bot.send_message(self.channel, embed=embed)
+            await self.bot.send_message(self.channel, embed=embed)
 
     async def list_accounts(self):
         with transaction(TradingViewerDBSession) as session:
@@ -70,25 +70,26 @@ class TradingViewer(GetLoggerMixin):
             else:
                 embed = discord.Embed(title='Watching the following TradingView accounts:')
                 for account in TradingViewAccount.get_all(session):
-                    embed.add_field(name=account.name, value=account.url)
+                    embed.add_field(name=account.name, value=account.url, inline=False)
 
-        await self.bot.send_message(self.channel, embed=embed)
+            await self.bot.send_message(self.channel, embed=embed)
 
-    async def upload_post(self, post):
-        embed = discord.Embed(title=post.title, url=post.url,
-                timestamp=post.timestamp, description=post.description)
-        embed.set_author(name=post.account.name, url=post.account.url,
-                icon_url=post.account.image_url)
-        embed.set_image(url=post.image_url)
+    async def upload_posts(self, posts):
+        with transaction(TradingViewerDBSession) as session:
+            for post in posts:
+                embed = discord.Embed(title=post.title, url=post.url,
+                        timestamp=post.timestamp, description=post.description)
+                embed.set_author(name=post.account.name, url=post.account.url,
+                        icon_url=post.account.image_url)
+                embed.set_image(url=post.image_url)
 
-        await self.bot.send_message(self.channel, embed=embed)
+                await self.bot.send_message(self.channel, embed=embed)
 
     async def _watch_for_new_posts(self):
         while True:
-            with transaction(TradingviewerDBSession) as session:
-                for new_post in TradingViewAccount.get_all_new_posts(session):
-                    await self.upload_post(new_post)
-
+            with transaction(TradingViewerDBSession) as session:
+                new_posts = await TradingViewAccount.get_all_new_posts(session)
+            await self.upload_posts(new_posts)
             await asyncio.sleep(self.interval)
 
     def run(self):
@@ -102,6 +103,7 @@ class TradingViewer(GetLoggerMixin):
         @viewer.bot.event
         async def on_ready():
             logger.debug('start')
+            viewer.bot.loop.create_task(viewer._watch_for_new_posts())
 
         @viewer.bot.command()
         async def add(account_name : str):
@@ -115,5 +117,4 @@ class TradingViewer(GetLoggerMixin):
         async def list():
             await viewer.list_accounts()
 
-        viewer.bot.loop.create_task(viewer._watch_for_new_posts())
         viewer.run()

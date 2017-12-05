@@ -34,6 +34,7 @@ entry_points = {
     'console_scripts': [
         'initializedb = scripts.initialize_database:main',
         'watch-posts = scripts.watch_for_posts:main',
+        'add-accounts = scripts.add_accounts:main',
     ]
 }
 

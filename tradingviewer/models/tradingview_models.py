@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -20,6 +21,7 @@ from ..utils import (
 
 TRADINGVIEW_URL_BASE = 'https://www.tradingview.com'
 ACCOUNT_URL_FMT = TRADINGVIEW_URL_BASE + '/u/{account_name}'
+IDEAS_API_URL = TRADINGVIEW_URL_BASE + '/ideas-widget/'
 
 
 class TradingViewAccount(TradingViewerBase, GetLoggerMixin):
@@ -50,10 +52,12 @@ class TradingViewAccount(TradingViewerBase, GetLoggerMixin):
         logger.info(name)
 
         url = ACCOUNT_URL_FMT.format(account_name=name)
-        soup = await get_soup(url)
-        if not soup:
-            logger.warning(f'account does not exist: {name}')
-            return
+        async with aiohttp.get(url) as response:
+            if response.status != 200:
+                logger.warning(f'account does not exist: {name}')
+                return
+
+            soup = get_soup(await response.text())
 
         image = soup.find('img', class_='tv-profile__avatar-img')
         image_url = image['src']
@@ -71,44 +75,39 @@ class TradingViewAccount(TradingViewerBase, GetLoggerMixin):
         logger = self._logger('get_new_posts')
         logger.debug(self.name)
 
-        soup = await get_soup(self.url)
-        if not soup:
-            return
+        params = {
+            'username' : self.name,
+            'count' : count,
+            'interval' : 'all',
+            'sort' : 'recent',
+            'stream' : 'all',
+            'time' : 'all'
+        }
+        async with aiohttp.get(IDEAS_API_URL, params=params) as response:
+            if response.status != 200:
+                return []
+            latest_post_data = await response.json()
 
         new_posts = []
-        for post_div in soup('div', class_='tv-widget-idea')[:count]:
-            post_title_link_tag = post_div.find('a', class_='tv-widget-idea__title')
-            post_url = TRADINGVIEW_URL_BASE + post_title_link_tag['href']
-            if TradingViewPost.get_by_url(session, post_url):
+        latest_post_soup = get_soup(latest_post_data.get('html', ''))
+        latest_post_divs = latest_post_soup('div', id=re.compile(r'chart-(\d+)')) or []
+        for post_div in latest_post_divs[:count]:
+            post = TradingViewPost.add_from_div(session, post_div)
+            if not post:
                 break
 
-            post_title = post_title_link_tag.text.strip()
-            post_text = post_div.find('p', class_='tv-widget-idea__description-text').text.strip()
-
-            post_image_tag = post_div.find('img', class_='tv-widget-idea__cover')
-            post_image_url = post_image_tag['src']
-
-            post_timestamp_div = post_div.find('span', class_='tv-widget-idea__time')
-            post_timestamp_seconds = float(post_timestamp_div['data-timestamp'])
-            post_timestamp = datetime.fromtimestamp(post_timestamp_seconds)
-
-            post = TradingViewPost(
-                title=post_title,
-                description=post_text,
-                url=post_url,
-                image_url=post_image_url,
-                timestamp=post_timestamp
-            )
             self.posts.append(post)
             new_posts.append(post)
 
         return new_posts
 
     @classmethod
-    async def get_all_new_posts(self, session):
+    async def get_all_new_posts(cls, session):
+        all_new_posts = []
         for account in cls.get_all(session):
-            for post in account.get_new_posts(session):
-                yield post
+            all_new_posts.extend(await account.get_new_posts(session))
+
+        return all_new_posts
 
     @classmethod
     def delete(cls, session, account):
@@ -135,3 +134,36 @@ class TradingViewPost(TradingViewerBase, GetLoggerMixin):
     @classmethod
     def get_by_url(cls, session, url):
         return session.query(cls).filter(cls.url == url).first()
+
+    @classmethod
+    def add_from_div(cls, session, post_div):
+        logger = cls._logger('add_from_div')
+        
+        post_url_link = post_div.find('a', class_='chart-page-popup')
+        post_url = TRADINGVIEW_URL_BASE + post_url_link['data-chart']
+        if cls.get_by_url(session, post_url):
+            logger.debug(f'seen post: {post_url}')
+            return
+
+        logger.info(post_url)
+
+        post_title_div = post_div.find('div', class_='chart-title')
+        post_title = post_title_div.text.strip()
+        post_text = post_div.find('div', class_='desc').text.strip()
+
+        post_image_element = post_url_link.find('img')
+        post_image_url = post_image_element['data-image_big']
+
+        timestamp_div = post_div.find('div', class_='time-info')
+        post_timestamp = datetime.fromtimestamp(float(timestamp_div['data-timestamp']))
+
+        post = cls(
+            title=post_title,
+            description=post_text,
+            url=post_url,
+            image_url=post_image_url,
+            timestamp=post_timestamp
+        )
+        session.add(post)
+
+        return post

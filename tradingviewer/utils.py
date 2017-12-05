@@ -9,12 +9,8 @@ from bs4 import BeautifulSoup
 HTML_PARSER = 'html.parser'
 
 
-async def get_soup(url):
-    async with aiohttp.get(url) as response:
-        if response.status != 200:
-            return
-
-        return BeautifulSoup(await response.text(), HTML_PARSER)
+def get_soup(html, parser=HTML_PARSER):
+    return BeautifulSoup(html, parser)
 
 
 class GetLoggerMixin:

@@ -17,7 +17,7 @@ NAMING_CONVENTION = {
 
 metadata = MetaData(naming_convention=NAMING_CONVENTION)
 TradingViewerBase = declarative_base(metadata=metadata)
-TradingViewerDBSession = sessionmaker()
+TradingViewerDBSession = sessionmaker(expire_on_commit=False)
 
 
 @contextmanager
