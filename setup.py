@@ -16,9 +16,9 @@ with open(os.path.join(here, 'VERSION')) as f:
 dependency_links = [
     ]
 install_requires = [
-    'aiohttp',
-    'bs4',
+    'aiohttp<1.1.0', # required by discord
     'discord',
+    'bs4',
     'psycopg2',
     'pyyaml',
     'sqlalchemy',
