@@ -27,6 +27,9 @@ class TradingViewer(GetLoggerMixin):
     channel = property(get_channel)
 
     async def add_account(self, account_name):
+        embed = None
+        latest_posts = []
+
         with transaction(TradingViewerDBSession) as session:
             account = TradingViewAccount.get_by_name(session, account_name)
             added = False
@@ -43,12 +46,13 @@ class TradingViewer(GetLoggerMixin):
                     embed.set_image(url=account.image_url)
                     added = True
 
-            await self.bot.send_message(self.channel, embed=embed)
-
             if added:
                 latest_posts = await account.get_new_posts(session, count=1)
-                if latest_posts:
-                    await self.upload_posts(latest_posts)
+
+        if embed:
+            await self.upload_embed(embed)
+        if lateest_posts:
+            await self.upload_posts(latest_posts)
 
     async def remove_account(self, account_name):
         with transaction(TradingViewerDBSession) as session:
@@ -60,7 +64,7 @@ class TradingViewer(GetLoggerMixin):
                 embed.set_image(url=account.image_url)
                 TradingViewAccount.delete(session, account)
 
-            await self.bot.send_message(self.channel, embed=embed)
+        await self.upload_embed(embed)
 
     async def list_accounts(self):
         with transaction(TradingViewerDBSession) as session:
@@ -72,18 +76,27 @@ class TradingViewer(GetLoggerMixin):
                 for account in TradingViewAccount.get_all(session):
                     embed.add_field(name=account.name, value=account.url, inline=False)
 
-            await self.bot.send_message(self.channel, embed=embed)
+        await self.upload_embed(embed)
 
     async def upload_posts(self, posts):
-        with transaction(TradingViewerDBSession) as session:
-            for post in posts:
-                embed = discord.Embed(title=post.title, url=post.url,
-                        timestamp=post.timestamp, description=post.description)
-                embed.set_author(name=post.account.name, url=post.account.url,
-                        icon_url=post.account.image_url)
-                embed.set_image(url=post.image_url)
+        for post in posts:
+            embed = discord.Embed(title=post.title, url=post.url,
+                    timestamp=post.timestamp, description=post.description)
+            embed.set_author(name=post.account.name, url=post.account.url,
+                    icon_url=post.account.image_url)
+            embed.set_image(url=post.image_url)
 
-                await self.bot.send_message(self.channel, embed=embed)
+            await self.upload_embed(embed)
+                
+    async def upload_embed(self, embed):
+        logger = self._logger('upload_embed')
+
+        try:
+            self.bot.send_message(self.channel, embed=embed)
+        except discord.http.HTTPException as e:
+            logger.error(e, exc_info=True, extra=embed.to_dict())
+        else:
+            logger.info(f'{embed.author.name}: {embed.title}', extra=embed.to_dict())
 
     async def _watch_for_new_posts(self):
         while True:
