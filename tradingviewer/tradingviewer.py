@@ -11,7 +11,7 @@ from .models.tradingview_models import TradingViewAccount
 from .utils import GetLoggerMixin
 
 
-MAX_EMBED_DESCRIPTION_LENGTH = 2000
+MAX_EMBED_DESCRIPTION_LENGTH = 500
 
 
 class TradingViewer(GetLoggerMixin):
