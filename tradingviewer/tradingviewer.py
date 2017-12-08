@@ -54,7 +54,7 @@ class TradingViewer(GetLoggerMixin):
             await self.upload_embed(embed)
             if added:
                 latest_posts = await account.get_new_posts(session, count=1)
-                if lateest_posts:
+                if latest_posts:
                     await self.upload_posts(latest_posts)
 
     async def remove_account(self, account_name):
