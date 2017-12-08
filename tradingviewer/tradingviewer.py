@@ -92,7 +92,7 @@ class TradingViewer(GetLoggerMixin):
             await self.upload_embed(embed)
 
     def _validate_embed(self, embed):
-        if len(embed.description) > MAX_EMBED_DESCRIPTION_LENGTH:
+        if isinstance(embed.description, str) and len(embed.description) > MAX_EMBED_DESCRIPTION_LENGTH:
             paragraphs = embed.description.splitlines()
             new_embed = paragraphs[0] + '\n...'
             if len(new_embed) > MAX_EMBED_DESCRIPTION_LENGTH:
