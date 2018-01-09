@@ -15,9 +15,9 @@ MAX_EMBED_DESCRIPTION_LENGTH = 500
 
 
 class TradingViewer(GetLoggerMixin):
-    __loggername__ = f'{__name__}.TradingViewer'
-
     NAME = 'TradingViewer'
+    __loggername__ = f'{__name__}.{NAME}'
+
 
     def __init__(self, **config):
         self.bot = commands.Bot(command_prefix=config['command_prefix'])
